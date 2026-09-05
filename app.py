@@ -1,11 +1,18 @@
 import json
 import streamlit as st
-from openai import OpenAI
-from pydantic import BaseModel, Field
-from typing import Optional
+
+# Safe import handler for Streamlit Cloud deployment
+try:
+    from google import genai
+    from google.genai import types
+except ModuleNotFoundError:
+    st.error(
+        "⚠️ The `google-genai` module is not installed. Please create a `requirements.txt` file containing `google-genai` in your repository root."
+    )
+    st.stop()
 
 # ------------------------------------------------------------------------------
-# 1. Page Configuration & UI Setup
+# 1. Configuration & Interface Layout
 # ------------------------------------------------------------------------------
 st.set_page_config(
     page_title="DecodeLabs - Project 1 Extraction Engine",
@@ -14,20 +21,19 @@ st.set_page_config(
 )
 
 st.title("⚙️ Project 1: Deterministic Data Extraction Engine")
-st.caption("Powered by DecodeLabs Project 1 Blueprint | Zero-Variance Pipeline")
+st.caption("Powered by DecodeLabs Project 1 Blueprint | Zero-Variance Pipeline (Gemini Engine)")
 
-# Sidebar for API Key and Model Controls
 with st.sidebar:
     st.header("API & Pipeline Settings")
-    api_key = st.text_input("OpenAI API Key", type="password")
-    selected_model = st.selectbox("Model", ["gpt-4o-mini", "gpt-4o"])
+    api_key = st.text_input("Gemini API Key", type="password")
+    selected_model = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
     
-    # Enforce hardcoded zero temperature visually for compliance
+    # Fixed 0.0 temperature for Project 1 compliance
     temperature = st.slider("Temperature (Fixed)", min_value=0.0, max_value=0.0, value=0.0, step=0.0)
-    st.info("Temperature fixed at 0.0 to enforce deterministic outputs.")
+    st.info("Temperature hardcoded to 0.0 to eliminate token output variance.")
 
 # ------------------------------------------------------------------------------
-# 2. Production System Prompt Template (Static Prefix First for Caching)
+# 2. Production System Prompt Template
 # ------------------------------------------------------------------------------
 SYSTEM_PROMPT = """You are a deterministic data extraction engine. Extract information from the provided raw text input into the exact JSON schema specified below.
 
@@ -84,14 +90,14 @@ Output:
 ###"""
 
 # ------------------------------------------------------------------------------
-# 3. Main Application Interface
+# 3. Application Processing Logic
 # ------------------------------------------------------------------------------
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("Raw Unstructured Data Input")
     
-    # Gatekeeper Test Case default text (purposefully omits phone number)
+    # Gatekeeper test case default (omits phone number)
     default_text = """From: Marcus Vance
 Subject: Delayed delivery of items
 
@@ -111,42 +117,40 @@ with col2:
     
     if extract_btn:
         if not api_key:
-            st.error("Please enter your OpenAI API key in the sidebar.")
+            st.error("Please enter your Gemini API key in the sidebar.")
         elif not raw_input.strip():
             st.warning("Please provide input text to extract.")
         else:
             try:
-                # Initialize API client
-                client = OpenAI(api_key=api_key)
-                
-                # Format prompt
+                # Initialize Google GenAI client
+                client = genai.Client(api_key=api_key)
                 formatted_prompt = SYSTEM_PROMPT.replace("{RAW_USER_DATA}", raw_input)
                 
                 with st.spinner("Processing through Compilation Engine..."):
-                    # Call LLM with forced 0.0 temperature
-                    response = client.chat.completions.create(
+                    response = client.models.generate_content(
                         model=selected_model,
-                        temperature=0.0,
-                        messages=[{"role": "user", "content": formatted_prompt}]
+                        contents=formatted_prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.0
+                        )
                     )
                     
-                    raw_response = response.choices[0].message.content.strip()
+                    raw_response = response.text.strip()
                     
-                    # Clean up response if backticks were generated
+                    # Strip accidental markdown formatting
                     if raw_response.startswith("```"):
                         raw_response = raw_response.strip("`").replace("json\n", "").strip()
 
-                    # Step 1 Validation: Syntax Parsing
                     parsed_json = json.loads(raw_response)
                     
                     st.success("Extraction Completed Successfully!")
                     st.json(parsed_json)
                     
-                    # Highlight Gatekeeper logic compliance
                     if parsed_json.get("contact_phone") is None:
-                        st.info(" Gatekeeper Gate Passed: Missing phone number deterministically returned `null`.")
+                        st.info("Gatekeeper Gate Passed: Missing phone number deterministically returned `null`.")
                         
             except json.JSONDecodeError as e:
-                st.error(f"JSON Parsing Error: The engine output failed syntax parsing.\n\nError: {str(e)}")
+                st.error(f"JSON Parsing Error: Engine output failed syntax parsing.\n\nError: {str(e)}")
             except Exception as e:
                 st.error(f"API Error: {str(e)}")
+                        
