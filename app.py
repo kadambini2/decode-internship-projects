@@ -1,15 +1,7 @@
 import json
+import urllib.request
+import urllib.error
 import streamlit as st
-
-# Safe import handler for Streamlit Cloud deployment
-try:
-    from google import genai
-    from google.genai import types
-except ModuleNotFoundError:
-    st.error(
-        "⚠️ The `google-genai` module is not installed. Please create a `requirements.txt` file containing `google-genai` in your repository root."
-    )
-    st.stop()
 
 # ------------------------------------------------------------------------------
 # 1. Configuration & Interface Layout
@@ -21,14 +13,14 @@ st.set_page_config(
 )
 
 st.title("⚙️ Project 1: Deterministic Data Extraction Engine")
-st.caption("Powered by DecodeLabs Project 1 Blueprint | Zero-Variance Pipeline (Gemini Engine)")
+st.caption("Powered by DecodeLabs Project 1 Blueprint | Direct REST API Pipeline")
 
 with st.sidebar:
     st.header("API & Pipeline Settings")
     api_key = st.text_input("Gemini API Key", type="password")
     selected_model = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
     
-    # Fixed 0.0 temperature for Project 1 compliance
+    # Hardcoded 0.0 temperature for Project 1 compliance
     temperature = st.slider("Temperature (Fixed)", min_value=0.0, max_value=0.0, value=0.0, step=0.0)
     st.info("Temperature hardcoded to 0.0 to eliminate token output variance.")
 
@@ -90,14 +82,43 @@ Output:
 ###"""
 
 # ------------------------------------------------------------------------------
-# 3. Application Processing Logic
+# 3. Direct REST API Call Function (No External SDKs Required)
+# ------------------------------------------------------------------------------
+def call_gemini_api(api_key: str, model: str, prompt: str) -> str:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": prompt}]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.0,
+            "responseMimeType": "application/json"
+        }
+    }
+    
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url, 
+        data=data, 
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    
+    with urllib.request.urlopen(req) as response:
+        result = json.loads(response.read().decode("utf-8"))
+        return result["candidates"][0]["content"]["parts"][0]["text"]
+
+# ------------------------------------------------------------------------------
+# 4. Application Processing Logic
 # ------------------------------------------------------------------------------
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("Raw Unstructured Data Input")
     
-    # Gatekeeper test case default (omits phone number)
     default_text = """From: Marcus Vance
 Subject: Delayed delivery of items
 
@@ -122,22 +143,12 @@ with col2:
             st.warning("Please provide input text to extract.")
         else:
             try:
-                # Initialize Google GenAI client
-                client = genai.Client(api_key=api_key)
                 formatted_prompt = SYSTEM_PROMPT.replace("{RAW_USER_DATA}", raw_input)
                 
                 with st.spinner("Processing through Compilation Engine..."):
-                    response = client.models.generate_content(
-                        model=selected_model,
-                        contents=formatted_prompt,
-                        config=types.GenerateContentConfig(
-                            temperature=0.0
-                        )
-                    )
+                    raw_response = call_gemini_api(api_key, selected_model, formatted_prompt).strip()
                     
-                    raw_response = response.text.strip()
-                    
-                    # Strip accidental markdown formatting
+                    # Clean markdown wrappers if present
                     if raw_response.startswith("```"):
                         raw_response = raw_response.strip("`").replace("json\n", "").strip()
 
@@ -149,8 +160,10 @@ with col2:
                     if parsed_json.get("contact_phone") is None:
                         st.info("Gatekeeper Gate Passed: Missing phone number deterministically returned `null`.")
                         
+            except urllib.error.HTTPError as e:
+                error_details = e.read().decode("utf-8")
+                st.error(f"API Request Failed ({e.code}): {error_details}")
             except json.JSONDecodeError as e:
                 st.error(f"JSON Parsing Error: Engine output failed syntax parsing.\n\nError: {str(e)}")
             except Exception as e:
-                st.error(f"API Error: {str(e)}")
-                        
+                st.error(f"Unexpected Error: {str(e)}")
