@@ -20,8 +20,8 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password")
     selected_model = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
     
-    # Hardcoded 0.0 temperature for Project 1 compliance
-    temperature = st.slider("Temperature (Fixed)", min_value=0.0, max_value=0.0, value=0.0, step=0.0)
+    # Disabled input to enforce 0.0 temperature safely without widget errors
+    temperature = st.number_input("Temperature (Fixed)", value=0.0, disabled=True)
     st.info("Temperature hardcoded to 0.0 to eliminate token output variance.")
 
 # ------------------------------------------------------------------------------
@@ -148,7 +148,6 @@ with col2:
                 with st.spinner("Processing through Compilation Engine..."):
                     raw_response = call_gemini_api(api_key, selected_model, formatted_prompt).strip()
                     
-                    # Clean markdown wrappers if present
                     if raw_response.startswith("```"):
                         raw_response = raw_response.strip("`").replace("json\n", "").strip()
 
